@@ -19,58 +19,6 @@ export function createKotlinFunction(functionType: FunctionType): SourceFile[] {
   )
   const kotlinParamsForward = functionType.parameters.map((p) => p.escapedName)
   const lambdaSignature = `(${kotlinParamTypes.join(', ')}) -> ${kotlinReturnType}`
-  const bridgedReturn = new KotlinCxxBridgedType(functionType.returnType)
-  const bridgedParameters = functionType.parameters.map(
-    (p) => new KotlinCxxBridgedType(p)
-  )
-  const jniKotlinReturnType = bridgedReturn.getTypeCode('kotlin')
-  const jniKotlinParams = bridgedParameters.map(
-    (p, i) =>
-      `${functionType.parameters[i]!.escapedName}: ${p.getTypeCode('kotlin')}`
-  )
-  const needsJniAdapter =
-    jniKotlinReturnType !== kotlinReturnType ||
-    bridgedParameters.some(
-      (p) => p.getTypeCode('kotlin') !== p.type.getCode('kotlin')
-    )
-  const nativeParamsForward = bridgedParameters.map((p, i) =>
-    p.getTypeCode('kotlin') !== p.type.getCode('kotlin')
-      ? p.parseFromKotlinToCpp(kotlinParamsForward[i]!, 'kotlin')
-      : kotlinParamsForward[i]!
-  )
-  const nativeCall = `invoke_cxx(${nativeParamsForward.join(',')})`
-  const nativeResult =
-    jniKotlinReturnType !== kotlinReturnType
-      ? bridgedReturn.parseFromCppToKotlin(nativeCall, 'kotlin')
-      : nativeCall
-
-  let jniAdapter = ''
-  if (needsJniAdapter) {
-    // Value classes such as ULong mangle invoke's JVM name. Keep the public
-    // Kotlin function type and expose an adapter using JNI-compatible types.
-    const paramsForward = bridgedParameters.map((p, i) =>
-      p.getTypeCode('kotlin') !== p.type.getCode('kotlin')
-        ? p.parseFromCppToKotlin(kotlinParamsForward[i]!, 'kotlin')
-        : kotlinParamsForward[i]!
-    )
-    const call = `invoke(${paramsForward.join(', ')})`
-    const result =
-      jniKotlinReturnType !== kotlinReturnType
-        ? bridgedReturn.parseFromKotlinToCpp(call, 'kotlin')
-        : call
-    // Nullable primitives are boxed, matching the C++ callback return lookup.
-    const returnType =
-      bridgedReturn.hasType && !jniKotlinReturnType.endsWith('?')
-        ? `${jniKotlinReturnType}?`
-        : jniKotlinReturnType
-    jniAdapter = `
-
-  @DoNotStrip
-  @Keep
-  fun invoke_jni(${jniKotlinParams.join(', ')}): ${returnType} {
-    return ${result}
-  }`
-  }
 
   const extraImports = functionType
     .getRequiredImports('kotlin')
@@ -102,7 +50,7 @@ fun interface ${name}: ${lambdaSignature} {
    */
   @DoNotStrip
   @Keep
-  override fun invoke(${kotlinParams.join(', ')}): ${kotlinReturnType}${jniAdapter}
+  override fun invoke(${kotlinParams.join(', ')}): ${kotlinReturnType}
 }
 
 /**
@@ -131,9 +79,9 @@ class ${name}_cxx: ${name} {
   @DoNotStrip
   @Keep
   override fun invoke(${kotlinParams.join(', ')}): ${kotlinReturnType}
-    = ${nativeResult}
+    = invoke_cxx(${kotlinParamsForward.join(',')})
 
-  private external fun invoke_cxx(${jniKotlinParams.join(', ')}): ${jniKotlinReturnType}
+  private external fun invoke_cxx(${kotlinParams.join(', ')}): ${kotlinReturnType}
 }
 
 /**
@@ -161,6 +109,7 @@ class ${name}_java(private val function: ${lambdaSignature}): ${name} {
     'c++/jni',
     `${name}_cxx`
   )
+  const bridgedReturn = new KotlinCxxBridgedType(functionType.returnType)
   const cxxNamespace = NitroConfig.current.getCxxNamespace('c++')
   const typename = functionType.getCode('c++')
 
@@ -198,7 +147,6 @@ class ${name}_java(private val function: ${lambdaSignature}): ${name} {
       return `${bridge.asJniReferenceType('alias')} /* ${p.escapedName} */`
     })
     .join(', ')})`
-  const jniMethodName = needsJniAdapter ? 'invoke_jni' : 'invoke'
 
   let cppCallBody: string
   let jniCallBody: string
@@ -206,7 +154,7 @@ class ${name}_java(private val function: ${lambdaSignature}): ${name} {
     // It returns void
     cppCallBody = `_func(${paramsForward.join(', ')});`
     jniCallBody = `
-static const auto method = javaClassStatic()->getMethod<${jniSignature}>("${jniMethodName}");
+static const auto method = javaClassStatic()->getMethod<${jniSignature}>("invoke");
 method(${jniParamsForward.join(', ')});
     `.trim()
   } else {
@@ -216,7 +164,7 @@ ${functionType.returnType.getCode('c++')} __result = _func(${paramsForward.join(
 return ${bridgedReturn.parseFromCppToKotlin('__result', 'c++')};
 `.trim()
     jniCallBody = `
-static const auto method = javaClassStatic()->getMethod<${jniSignature}>("${jniMethodName}");
+static const auto method = javaClassStatic()->getMethod<${jniSignature}>("invoke");
 auto __result = method(${jniParamsForward.join(', ')});
 return ${bridgedReturn.parseFromKotlinToCpp('__result', 'c++', true)};
     `.trim()
