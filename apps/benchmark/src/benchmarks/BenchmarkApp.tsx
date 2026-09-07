@@ -12,7 +12,6 @@ import {
 
 const CONTROLLER_URL = 'http://127.0.0.1:8173'
 const RUNNER_OPTIONS: Omit<BenchmarkRunnerOptions, 'reverse'> = {
-  targetBatchDurationMs: 150,
   warmupCount: 5,
   sampleCount: 20,
 }
@@ -38,11 +37,10 @@ function isRunConfiguration(
   )
 }
 
-async function waitForRuntimeToSettle(): Promise<void> {
+async function waitForInitialFrames(): Promise<void> {
   await new Promise<void>((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
   })
-  await new Promise<void>((resolve) => setTimeout(resolve, 1_000))
 }
 
 async function readConfiguration(): Promise<BenchmarkRunConfiguration> {
@@ -72,7 +70,7 @@ async function run(): Promise<BenchmarkRunResult> {
   const configuration = await readConfiguration()
   const environment = getBenchmarkEnvironment()
   assertReleaseBenchmarkEnvironment(environment)
-  await waitForRuntimeToSettle()
+  await waitForInitialFrames()
 
   const startedAt = new Date().toISOString()
   const start = performance.now()
@@ -87,17 +85,19 @@ async function run(): Promise<BenchmarkRunResult> {
         )
   if (selected.length === 0)
     throw new Error('Requested benchmark index is outside the suite.')
-  const metrics = await runBenchmarkDefinitions(selected, {
-    ...RUNNER_OPTIONS,
-    reverse: configuration.reverse,
-  })
+  const runner = RUNNER_OPTIONS
+  const metrics = await runBenchmarkDefinitions(
+    selected,
+    { ...runner, reverse: configuration.reverse },
+    configuration.platform
+  )
 
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     suiteVersion: 1,
     configuration,
     environment,
-    runner: RUNNER_OPTIONS,
+    runner,
     startedAt,
     durationMs: performance.now() - start,
     metrics,

@@ -1,22 +1,19 @@
-import type { MetricComparison, PlatformComparison } from './comparison'
-
-export interface PlatformReportMarkdownInput {
-  comparison: PlatformComparison
-}
-
-export interface PerformanceReportMarkdownOptions {
-  advisory: boolean
-  repository: string
-  baseSha: string
-  headSha: string
-  workflowRunUrl?: string
-}
+import {
+  REPORTING_THRESHOLD_PERCENT,
+  type MetricComparison,
+  type PlatformComparison,
+} from './comparison'
+import type { PerformanceReport } from './report'
 
 const OPERATION_NAMES: Readonly<Record<string, string>> = {
   'add-numbers': 'addNumbers()',
   'ascii-short': 'short ASCII string',
   'bounce-1-mib': 'bounce(1 MiB)',
   'bounce-4-kib': 'bounce(4 KiB)',
+  'bounce-native-4-kib': 'bounce native-owned buffer (4 KiB)',
+  'bounce-native-1-mib': 'bounce native-owned buffer (1 MiB)',
+  'deferred-worker-with-trigger':
+    'deferred worker Promise (includes trigger call)',
   'copy-1-mib': 'copy(1 MiB)',
   'copy-4-kib': 'copy(4 KiB)',
   'create': 'create()',
@@ -89,22 +86,16 @@ function formatPercent(value: number): string {
 function directionalChange(deltaPercent: number): string {
   if (deltaPercent > 0) return `+${formatPercent(deltaPercent)}% slower`
   if (deltaPercent < 0) return `-${formatPercent(deltaPercent)}% faster`
-  return '~0% unchanged'
+  return '~0% observed change'
 }
 
 function difference(metric: MetricComparison): string {
-  switch (metric.verdict) {
-    case 'regression':
-      return `🔴 ${directionalChange(metric.deltaPercent)}`
-    case 'improvement':
-      return `🟢 ${directionalChange(metric.deltaPercent)}`
-    case 'inconclusive':
-      return `🟡 ${directionalChange(metric.deltaPercent)} (noisy)`
-    case 'advisory':
-      return `ℹ️ ${directionalChange(metric.deltaPercent)} (advisory)`
-    case 'unchanged':
-      return `⚪ ~${formatPercent(metric.deltaPercent)}% unchanged`
-  }
+  if (metric.deltaPercent === null) return '—'
+  if (metric.deltaPercent > 0)
+    return `🔴 ${directionalChange(metric.deltaPercent)}`
+  if (metric.deltaPercent < 0)
+    return `🟢 ${directionalChange(metric.deltaPercent)}`
+  return `⚪ ${directionalChange(metric.deltaPercent)}`
 }
 
 function measurement(
@@ -114,8 +105,11 @@ function measurement(
   const before = metric.baseMedianNsPerOp
   const after = metric.headMedianNsPerOp
   const value = revision === 'base' ? before : after
-  const isFaster = revision === 'base' ? before < after : after < before
+  if (value === null) return revision === 'base' ? '—' : '❌ Removed'
   const formatted = formatNumber(value)
+  if (before === null) return `⭐️ New (${formatted})`
+  const isFaster =
+    after !== null && (revision === 'base' ? before < after : after < before)
   return isFaster ? `<strong>${formatted}</strong>` : formatted
 }
 
@@ -154,70 +148,76 @@ function renderMetricTable(
   return lines.join('\n')
 }
 
-function renderPlatform(input: PlatformReportMarkdownInput): string[] {
-  const { comparison } = input
-  const name = platformName(comparison.platform)
-  const lines = [`### ${name}`]
-  if (!comparison.suiteComparable) {
-    lines.push(
-      '',
-      '> Benchmark definitions changed in this PR. Results require a new baseline and are not compared.'
-    )
-    return lines
-  }
-
-  const changed = comparison.comparisons.filter(
-    (metric) =>
-      metric.verdict === 'regression' || metric.verdict === 'improvement'
-  )
-  const other = comparison.comparisons.filter(
-    (metric) =>
-      metric.verdict !== 'regression' && metric.verdict !== 'improvement'
-  )
-  lines.push(
-    '',
-    changed.length === 0
-      ? 'Performance is unchanged! 😎'
-      : renderMetricTable(changed, comparison.platform),
-    '',
-    '<details>',
-    '  <summary>All Benchmarks</summary>',
-    other.length === 0
-      ? '  <p>Every benchmark had a decisive change.</p>'
-      : renderMetricTable(other, comparison.platform, 2),
-    '</details>'
-  )
-  return lines
-}
-
 export function renderPerformanceReportMarkdown(
-  platforms: readonly PlatformReportMarkdownInput[],
-  options: PerformanceReportMarkdownOptions
+  platforms: readonly PlatformComparison[],
+  options: {
+    repository: string
+    baseSha: string
+    headSha: string
+    workflowRunUrl?: string
+    artifactId?: number
+    runAttempt?: number
+    artifacts?: PerformanceReport['artifacts']
+  }
 ): string {
-  const orderedPlatforms = [...platforms].sort(
-    ({ comparison: left }, { comparison: right }) =>
-      left.platform === right.platform ? 0 : left.platform === 'ios' ? -1 : 1
-  )
   const lines = [
     '## Performance Report',
     '',
-    options.advisory
-      ? '> ⚠️ **Advisory:** Results do not fail this PR while the baseline is being calibrated.'
-      : '> Stable metrics are enforced against their calibrated regression budgets.',
+    '> ⚠️ **Advisory:** Results do not fail this PR.',
   ]
-  for (const platform of orderedPlatforms) {
-    lines.push('', ...renderPlatform(platform))
+  if (options.baseSha === options.headSha) {
+    lines.push(
+      '',
+      'Same-revision baseline run. Differences show measurement variation, not a code change.'
+    )
   }
-
-  const compareUrl = `https://github.com/${options.repository}/compare/${options.baseSha}..${options.headSha}`
-  const rawOutput =
-    options.workflowRunUrl == null
-      ? ''
-      : ` ([view raw output](${options.workflowRunUrl}))`
+  for (const platform of [...platforms].sort((a, b) =>
+    b.platform.localeCompare(a.platform)
+  )) {
+    lines.push('', `### ${platformName(platform.platform)}`, '')
+    const changed = platform.comparisons.filter(
+      (metric) =>
+        metric.deltaPercent === null ||
+        Math.abs(metric.deltaPercent) >= REPORTING_THRESHOLD_PERCENT
+    )
+    const other = platform.comparisons.filter(
+      (metric) =>
+        metric.deltaPercent !== null &&
+        Math.abs(metric.deltaPercent) < REPORTING_THRESHOLD_PERCENT
+    )
+    lines.push(
+      changed.length === 0
+        ? `No observed change reached the ${REPORTING_THRESHOLD_PERCENT}% reporting threshold.`
+        : renderMetricTable(changed, platform.platform),
+      '',
+      '<details>',
+      '  <summary>All Benchmarks</summary>',
+      other.length === 0
+        ? '  <p>All benchmarks are shown above.</p>'
+        : renderMetricTable(other, platform.platform, 2),
+      '</details>'
+    )
+  }
   lines.push(
     '',
-    `Benchmarking Code Diff [\`${options.baseSha.slice(0, 8)}\`...\`${options.headSha.slice(0, 8)}\`](${compareUrl})${rawOutput}`,
+    `Benchmarking Code Diff [\`${options.baseSha.slice(0, 8)}\`...\`${options.headSha.slice(0, 8)}\`](https://github.com/${options.repository}/compare/${options.baseSha}..${options.headSha})${options.workflowRunUrl == null ? '' : ` ([view raw output](${options.workflowRunUrl}))`}`,
     ''
   )
+  if (options.artifactId != null && options.workflowRunUrl != null) {
+    lines.push(
+      `Raw measurements: [performance-report-${options.runAttempt} (JSON artifact)](${options.workflowRunUrl}/artifacts/${options.artifactId}). Run ${options.workflowRunUrl.split('/').at(-1)}, attempt ${options.runAttempt}. Download requires GitHub access.`,
+      ''
+    )
+  }
+  const platformArtifacts = options.artifacts
+  if (platformArtifacts != null && options.workflowRunUrl != null) {
+    lines.push(
+      ...(['android', 'ios'] as const).map((platform) => {
+        const artifacts = platformArtifacts[platform]
+        return `${platformName(platform)}: [measurements, attempt ${artifacts.measurementAttempt}](${options.workflowRunUrl}/artifacts/${artifacts.measurementId}), [apps, attempt ${artifacts.buildAttempt}](${options.workflowRunUrl}/artifacts/${artifacts.buildId}).`
+      }),
+      ''
+    )
+  }
   return lines.join('\n')
 }

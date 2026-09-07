@@ -45,6 +45,9 @@ private:
   std::optional<std::function<void(double)>> _optionalCallback;
   bool _hasBooleanWritable;
   bool _isBooleanWritable;
+  std::shared_ptr<Promise<double>> _pendingPromise;
+  bool _isolatedBoolean = false;
+  std::string _isTextValue;
 
 private:
   static inline uint64_t calculateFibonacci(int count) noexcept {
@@ -103,6 +106,10 @@ public:
   void setIsBooleanWritable(bool isBooleanWritable) override;
   bool getHasBooleanWritable() override;
   void setHasBooleanWritable(bool hasBooleanWritable) override;
+  bool getIsolatedBoolean() override;
+  void setIsolatedBoolean(bool isolatedBoolean) override;
+  std::string getIsTextValue() override;
+  void setIsTextValue(const std::string& isTextValue) override;
 
 public:
   // Methods
@@ -205,6 +212,8 @@ public:
   std::shared_ptr<Promise<void>> promiseThrows() override;
   std::shared_ptr<Promise<double>> promiseReturnsInstantly() override;
   std::shared_ptr<Promise<double>> promiseReturnsInstantlyAsync() override;
+  std::shared_ptr<Promise<double>> createPendingPromise() override;
+  void resolvePendingPromiseOnWorker() override;
   std::shared_ptr<Promise<void>> promiseThatResolvesVoidInstantly() override;
   std::shared_ptr<Promise<std::optional<double>>> promiseThatResolvesToUndefined() override;
   std::shared_ptr<Promise<std::optional<double>>> awaitNullablePromise() override;

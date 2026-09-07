@@ -1,17 +1,15 @@
+import type { ReportMetadata } from './report'
 import { describe, expect, test } from 'bun:test'
-import {
-  bencherArguments,
-  bencherPublications,
-  validateMetadata,
-  type Metadata,
-} from './publish'
+import { bencherArguments, bencherPublications } from './publish'
 
-const metadata: Metadata = {
+const metadata: ReportMetadata = {
   repository: 'margelo/nitro',
   eventName: 'pull_request',
   pullRequestNumber: 123,
   baseSha: 'a'.repeat(40),
   headSha: 'b'.repeat(40),
+  baseSuiteHash: 'c'.repeat(64),
+  headSuiteHash: 'c'.repeat(64),
   platforms: ['android', 'ios'],
 }
 
@@ -64,6 +62,9 @@ describe('Bencher publications', () => {
     ])
     for (const { command } of publications) {
       expect(command).not.toContain('--start-point-reset')
+      expect(command).not.toContain('--github-actions')
+      expect(command).not.toContain('--ci-number')
+      expect(command).not.toContain('--error-on-alert')
     }
   })
 
@@ -85,16 +86,17 @@ describe('Bencher publications', () => {
       bencherArguments(main, 'ios', 'base', '/validated', 'nitro')
     ).toThrow()
   })
-
-  test('rejects missing/duplicate platforms and inconsistent PR metadata', () => {
-    expect(validateMetadata(metadata)).toEqual(metadata)
-    for (const invalid of [
-      { ...metadata, platforms: ['ios', 'ios'] },
-      { ...metadata, platforms: [] },
-      { ...metadata, pullRequestNumber: null },
-      { ...metadata, eventName: 'push' },
-      { ...metadata, headSha: 'not-a-sha' },
+  test('a changed suite publishes both measured revisions', () => {
+    const changed = { ...metadata, headSuiteHash: 'd'.repeat(64) }
+    const publications = bencherPublications(changed, '/validated', 'nitro')
+    expect(publications.map((entry) => entry.revision)).toEqual([
+      'base',
+      'base',
+      'head',
+      'head',
     ])
-      expect(() => validateMetadata(invalid)).toThrow()
+    expect(publications.flatMap((entry) => entry.command)).toContain(
+      '--start-point'
+    )
   })
 })

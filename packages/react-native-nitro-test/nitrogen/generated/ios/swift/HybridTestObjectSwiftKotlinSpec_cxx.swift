@@ -28,7 +28,7 @@ open class HybridTestObjectSwiftKotlinSpec_cxx {
   /**
    * Holds an instance of the `HybridTestObjectSwiftKotlinSpec` Swift protocol.
    */
-  private var __implementation: any HybridTestObjectSwiftKotlinSpec
+  private let __implementation: any HybridTestObjectSwiftKotlinSpec
 
   /**
    * Holds a weak pointer to the C++ class that wraps the Swift class.
@@ -453,6 +453,28 @@ open class HybridTestObjectSwiftKotlinSpec_cxx {
     @inline(__always)
     set {
       self.__implementation.isBooleanWritable = newValue
+    }
+  }
+  
+  public final var isolatedBoolean: Bool {
+    @inline(__always)
+    get {
+      return self.__implementation.isolatedBoolean
+    }
+    @inline(__always)
+    set {
+      self.__implementation.isolatedBoolean = newValue
+    }
+  }
+  
+  public final var isTextValue: std.string {
+    @inline(__always)
+    get {
+      return std.string(self.__implementation.isTextValue)
+    }
+    @inline(__always)
+    set {
+      self.__implementation.isTextValue = String(newValue)
     }
   }
   
@@ -1561,6 +1583,36 @@ open class HybridTestObjectSwiftKotlinSpec_cxx {
     } catch (let __error) {
       let __exceptionPtr = __error.toCpp()
       return bridge.create_Result_std__shared_ptr_Promise_double___(__exceptionPtr)
+    }
+  }
+  
+  @inline(__always)
+  public final func createPendingPromise() -> bridge.Result_std__shared_ptr_Promise_double___ {
+    do {
+      let __result = try self.__implementation.createPendingPromise()
+      let __resultCpp = { () -> bridge.std__shared_ptr_Promise_double__ in
+        let __promise = bridge.create_std__shared_ptr_Promise_double__()
+        let __promiseHolder = bridge.wrap_std__shared_ptr_Promise_double__(__promise)
+        __result
+          .then({ __result in __promiseHolder.resolve(__result) })
+          .catch({ __error in __promiseHolder.reject(__error.toCpp()) })
+        return __promise
+      }()
+      return bridge.create_Result_std__shared_ptr_Promise_double___(__resultCpp)
+    } catch (let __error) {
+      let __exceptionPtr = __error.toCpp()
+      return bridge.create_Result_std__shared_ptr_Promise_double___(__exceptionPtr)
+    }
+  }
+  
+  @inline(__always)
+  public final func resolvePendingPromiseOnWorker() -> bridge.Result_void_ {
+    do {
+      try self.__implementation.resolvePendingPromiseOnWorker()
+      return bridge.create_Result_void_()
+    } catch (let __error) {
+      let __exceptionPtr = __error.toCpp()
+      return bridge.create_Result_void_(__exceptionPtr)
     }
   }
   

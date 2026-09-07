@@ -1,23 +1,20 @@
 import { mkdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { parseArguments, requiredArgument } from './args'
-import {
-  compareRuns,
-  renderPlatformMarkdown,
-  toBencherMetricFormat,
-} from './comparison'
-import { validateBenchmarkRun } from './schema'
+import { installApp, runDeviceCase } from './run-device'
+import { combineIsolatedCases } from './isolated-cases'
+import type { BenchmarkRunResult } from '../../apps/benchmark/src/benchmarks/types'
 import { calculateSuiteHash } from './suite-hash'
+import type { BuildMetadata } from './build-metadata'
 
 const argumentsMap = parseArguments(Bun.argv.slice(2))
-const platform = requiredArgument(argumentsMap, 'platform')
-if (platform !== 'android' && platform !== 'ios') {
+const platformArgument = requiredArgument(argumentsMap, 'platform')
+if (platformArgument !== 'android' && platformArgument !== 'ios') {
   throw new Error('--platform must be android or ios.')
 }
+const platform = platformArgument
 const baseApp = path.resolve(requiredArgument(argumentsMap, 'base-app'))
 const headApp = path.resolve(requiredArgument(argumentsMap, 'head-app'))
-const baseRoot = path.resolve(requiredArgument(argumentsMap, 'base-root'))
-const headRoot = path.resolve(requiredArgument(argumentsMap, 'head-root'))
 const baseSha = requiredArgument(argumentsMap, 'base-sha')
 const headSha = requiredArgument(argumentsMap, 'head-sha')
 const outputDirectory = path.resolve(
@@ -28,116 +25,115 @@ const device = requiredArgument(argumentsMap, 'device')
 const osVersion = requiredArgument(argumentsMap, 'os-version')
 const architecture = requiredArgument(argumentsMap, 'architecture')
 const toolchain = requiredArgument(argumentsMap, 'toolchain')
-const advisoryMode = argumentsMap.get('mode')?.[0] !== 'enforce'
 
 await mkdir(outputDirectory, { recursive: true })
-const [baseSuiteHash, headSuiteHash] = await Promise.all([
-  calculateSuiteHash(baseRoot),
-  calculateSuiteHash(headRoot),
-])
+// CI binds the downloaded apps to their original build, even on job reruns.
+// Local callers can still point at their two source checkouts.
+const metadataPath = argumentsMap.get('build-metadata')?.[0]
+const build: BuildMetadata | undefined =
+  metadataPath == null
+    ? undefined
+    : JSON.parse(await readFile(metadataPath, 'utf8'))
+if (
+  build != null &&
+  (build.baseSha !== baseSha ||
+    build.headSha !== headSha ||
+    build.platform !== platform ||
+    build.architecture !== architecture ||
+    build.toolchain !== toolchain ||
+    build.configuration !== 'Release' ||
+    build.workflowRunId !== Number(process.env.GITHUB_RUN_ID))
+) {
+  throw new Error(
+    'Downloaded app metadata does not match the requested revisions or testbed.'
+  )
+}
+const [baseSuiteHash, headSuiteHash] =
+  build == null
+    ? await Promise.all([
+        calculateSuiteHash(
+          path.resolve(requiredArgument(argumentsMap, 'base-root'))
+        ),
+        calculateSuiteHash(
+          path.resolve(requiredArgument(argumentsMap, 'head-root'))
+        ),
+      ])
+    : [build.baseSuiteHash, build.headSuiteHash]
+if (build != null) {
+  await Bun.write(
+    path.join(outputDirectory, 'build.json'),
+    `${JSON.stringify(build, null, 2)}\n`
+  )
+  await Bun.write(
+    path.join(outputDirectory, 'measurement.json'),
+    `${JSON.stringify({ buildArtifactId: Number(process.env.BUILD_ARTIFACT_ID), runAttempt: Number(process.env.GITHUB_RUN_ATTEMPT) }, null, 2)}\n`
+  )
+}
 
-const baseResults: string[] = []
-const headResults: string[] = []
+await Bun.write(
+  path.join(outputDirectory, 'suite.json'),
+  `${JSON.stringify({ baseSuiteHash, headSuiteHash }, null, 2)}\n`
+)
 
-async function runOne(
+const sameBinary = baseSha === headSha
+const headId = 'com.margelo.nitrobenchmark.head'
+const baseId = sameBinary ? headId : 'com.margelo.nitrobenchmark'
+await installApp(platform, deviceId, headApp, headId)
+if (!sameBinary) {
+  await installApp(platform, deviceId, baseApp, baseId)
+}
+
+async function runCase(
   revision: 'base' | 'head',
-  sequence: number,
-  reverse: boolean
-): Promise<void> {
+  index: number
+): Promise<BenchmarkRunResult> {
   const isBase = revision === 'base'
-  const output = path.join(outputDirectory, `${revision}-${sequence}.json`)
-  const runId = `${platform}-${revision}-${sequence}`
-  const startedAt = performance.now()
-  console.info(
-    `[NitroBenchmark] ${new Date().toISOString()} ${runId}: starting (${reverse ? 'reverse' : 'forward'} order)`
-  )
-  const command = [
-    'bun',
-    path.join(import.meta.dir, 'run-device.ts'),
-    '--platform',
-    platform,
-    '--app',
-    isBase ? baseApp : headApp,
-    '--output',
-    output,
-    '--run-id',
-    runId,
-    '--reverse',
-    String(reverse),
-    '--commit-sha',
-    isBase ? baseSha : headSha,
-    '--suite-hash',
-    isBase ? baseSuiteHash : headSuiteHash,
-    '--device-id',
+  const name = `${revision}-1`
+  return runDeviceCase(
     deviceId,
-    '--device',
-    device,
-    '--os-version',
-    osVersion,
-    '--architecture',
-    architecture,
-    '--toolchain',
-    toolchain,
-  ]
-  const child = Bun.spawn(command, { stdout: 'inherit', stderr: 'inherit' })
-  const exitCode = await child.exited
-  if (exitCode !== 0) throw new Error(`${revision} run ${sequence} failed.`)
-  const result = validateBenchmarkRun(
-    JSON.parse(await readFile(output, 'utf8'))
+    isBase ? baseId : headId,
+    {
+      platform,
+      runId: `${platform}-${revision}-1`,
+      reverse: false,
+      benchmarkIndex: index,
+      commitSha: isBase ? baseSha : headSha,
+      suiteHash: isBase ? baseSuiteHash : headSuiteHash,
+      device,
+      osVersion,
+      architecture,
+      toolchain,
+    },
+    path.join(outputDirectory, `${name}-cases`, `case-${index}.json`)
   )
-  console.info(
-    `[NitroBenchmark] ${new Date().toISOString()} ${runId}: complete; ${result.metrics.length} metrics, suite ${(result.durationMs / 1_000).toFixed(1)}s, wall ${((performance.now() - startedAt) / 1_000).toFixed(1)}s`
-  )
-  if (isBase) {
-    baseResults.push(output)
-  } else {
-    headResults.push(output)
+}
+
+const baseRuns: BenchmarkRunResult[] = []
+const headRuns: BenchmarkRunResult[] = []
+// Each revision reports its own suite size. Alternate fresh processes while
+// both have cases left; the report matches their results by ID, not position.
+let baseCount = 1
+let headCount = 1
+for (let index = 0; index < Math.max(baseCount, headCount); index++) {
+  if (index < baseCount) {
+    const base = await runCase('base', index)
+    baseRuns.push(base)
+    if (index === 0) baseCount = base.benchmarkCount!
+  }
+  if (index < headCount) {
+    const head = await runCase('head', index)
+    headRuns.push(head)
+    if (index === 0) headCount = head.benchmarkCount!
   }
 }
-
-async function load(files: readonly string[]) {
-  return Promise.all(
-    files.map(async (file) =>
-      validateBenchmarkRun(JSON.parse(await readFile(file, 'utf8')))
-    )
+for (const [name, runs] of [
+  ['base-1', baseRuns],
+  ['head-1', headRuns],
+] as const) {
+  if (runs.length === 0) continue
+  const result = combineIsolatedCases(runs)
+  await Bun.write(
+    path.join(outputDirectory, `${name}.json`),
+    `${JSON.stringify(result, null, 2)}\n`
   )
 }
-
-await runOne('base', 1, false)
-await runOne('head', 1, false)
-await runOne('head', 2, true)
-await runOne('base', 2, true)
-
-let baseRuns = await load(baseResults)
-let headRuns = await load(headResults)
-let comparison = compareRuns(baseRuns, headRuns, advisoryMode)
-if (comparison.rerunRecommended && comparison.suiteComparable) {
-  const noisyCount = comparison.comparisons.filter(
-    (metric) => metric.verdict === 'inconclusive'
-  ).length
-  console.info(
-    `[NitroBenchmark] ${noisyCount} inconclusive metrics; running the single permitted repeat pair.`
-  )
-  await runOne('head', 3, false)
-  await runOne('base', 3, true)
-  baseRuns = await load(baseResults)
-  headRuns = await load(headResults)
-  comparison = compareRuns(baseRuns, headRuns, advisoryMode)
-}
-
-await Promise.all([
-  Bun.write(
-    path.join(outputDirectory, `comparison-${platform}.json`),
-    `${JSON.stringify(comparison, null, 2)}\n`
-  ),
-  Bun.write(
-    path.join(outputDirectory, `summary-${platform}.md`),
-    `${renderPlatformMarkdown(comparison)}\n`
-  ),
-  Bun.write(
-    path.join(outputDirectory, `bencher-${platform}.json`),
-    `${JSON.stringify(toBencherMetricFormat(headRuns), null, 2)}\n`
-  ),
-])
-
-if (!advisoryMode && comparison.hasRegression) process.exitCode = 1

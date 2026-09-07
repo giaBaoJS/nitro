@@ -1,15 +1,16 @@
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { parseArguments, requiredArgument } from './args'
+import type { ReportMetadata } from './report'
 import { isSafeSha } from './schema'
 
 const COMMENT_MARKER = '<!-- nitro-performance-paired-comparison -->'
 
-interface PullRequestReport {
-  repository: string
+interface PullRequestReport extends Pick<
+  ReportMetadata,
+  'repository' | 'baseSha' | 'headSha'
+> {
   pullRequestNumber: number
-  baseSha: string
-  headSha: string
   markdown: string
 }
 
@@ -21,8 +22,12 @@ type GitHubRequest = (
 
 export async function postPerformanceComment(
   report: PullRequestReport,
-  request: GitHubRequest
+  request: GitHubRequest,
+  botLogin = 'github-actions[bot]'
 ): Promise<'created' | 'updated' | 'stale'> {
+  if (!/^[a-zA-Z0-9-]+\[bot\]$/.test(botLogin)) {
+    throw new Error('Performance comment author must be a GitHub bot login.')
+  }
   if (
     !/^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(report.repository) ||
     !Number.isSafeInteger(report.pullRequestNumber) ||
@@ -58,7 +63,7 @@ export async function postPerformanceComment(
     }[]
     const existing = comments.find(
       (comment) =>
-        comment.user.login === 'github-actions[bot]' &&
+        comment.user.login === botLogin &&
         comment.user.type === 'Bot' &&
         comment.body.startsWith(COMMENT_MARKER)
     )
@@ -83,10 +88,7 @@ if (import.meta.main) {
   const directory = requiredArgument(argumentsMap, 'directory')
   const metadata = JSON.parse(
     await readFile(path.join(directory, 'metadata.json'), 'utf8')
-  ) as Omit<PullRequestReport, 'markdown'>
-  if (metadata.repository !== process.env.GITHUB_REPOSITORY) {
-    throw new Error('Report repository does not match the trusted workflow.')
-  }
+  ) as ReportMetadata
   if (metadata.pullRequestNumber != null) {
     const token = process.env.GITHUB_TOKEN
     if (token == null) throw new Error('GITHUB_TOKEN is required.')
@@ -95,7 +97,7 @@ if (import.meta.main) {
       'utf8'
     )
     const status = await postPerformanceComment(
-      { ...metadata, markdown },
+      { ...metadata, pullRequestNumber: metadata.pullRequestNumber, markdown },
       async (endpoint, method = 'GET', body) => {
         const response = await fetch(`https://api.github.com${endpoint}`, {
           method,
@@ -112,7 +114,10 @@ if (import.meta.main) {
           throw new Error(`GitHub report request failed: ${response.status}.`)
         }
         return response.json()
-      }
+      },
+      process.env.GITHUB_APP_SLUG
+        ? `${process.env.GITHUB_APP_SLUG}[bot]`
+        : 'github-actions[bot]'
     )
     console.info(`Paired performance PR comment: ${status}.`)
   }

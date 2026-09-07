@@ -364,6 +364,24 @@ namespace margelo::nitro::test {
     static const auto method = _javaPart->javaClassStatic()->getMethod<void(jboolean /* isBooleanWritable */)>("setBooleanWritable");
     method(_javaPart, isBooleanWritable);
   }
+  bool JHybridTestObjectSwiftKotlinSpec::getIsolatedBoolean() {
+    static const auto method = _javaPart->javaClassStatic()->getMethod<jboolean()>("getIsolatedBoolean");
+    auto __result = method(_javaPart);
+    return static_cast<bool>(__result);
+  }
+  void JHybridTestObjectSwiftKotlinSpec::setIsolatedBoolean(bool isolatedBoolean) {
+    static const auto method = _javaPart->javaClassStatic()->getMethod<void(jboolean /* isolatedBoolean */)>("setIsolatedBoolean");
+    method(_javaPart, isolatedBoolean);
+  }
+  std::string JHybridTestObjectSwiftKotlinSpec::getIsTextValue() {
+    static const auto method = _javaPart->javaClassStatic()->getMethod<jni::local_ref<jni::JString>()>("isTextValue");
+    auto __result = method(_javaPart);
+    return __result->toStdString();
+  }
+  void JHybridTestObjectSwiftKotlinSpec::setIsTextValue(const std::string& isTextValue) {
+    static const auto method = _javaPart->javaClassStatic()->getMethod<void(jni::alias_ref<jni::JString> /* isTextValue */)>("setTextValue");
+    method(_javaPart, jni::make_jstring(isTextValue));
+  }
   std::variant<double, std::string> JHybridTestObjectSwiftKotlinSpec::getSomeVariant() {
     static const auto method = _javaPart->javaClassStatic()->getMethod<jni::local_ref<JVariant_Double_String>()>("getSomeVariant");
     auto __result = method(_javaPart);
@@ -1076,6 +1094,26 @@ namespace margelo::nitro::test {
       });
       return __promise;
     }();
+  }
+  std::shared_ptr<Promise<double>> JHybridTestObjectSwiftKotlinSpec::createPendingPromise() {
+    static const auto method = _javaPart->javaClassStatic()->getMethod<jni::local_ref<JPromise::javaobject>()>("createPendingPromise");
+    auto __result = method(_javaPart);
+    return [&]() {
+      auto __promise = Promise<double>::create();
+      __result->cthis()->addOnResolvedListener([=](const jni::alias_ref<jni::JObject>& __boxedResult) {
+        auto __result = jni::static_ref_cast<jni::JDouble>(__boxedResult);
+        __promise->resolve(__result->value());
+      });
+      __result->cthis()->addOnRejectedListener([=](const jni::alias_ref<jni::JThrowable>& __throwable) {
+        jni::JniException __jniError(__throwable);
+        __promise->reject(std::make_exception_ptr(__jniError));
+      });
+      return __promise;
+    }();
+  }
+  void JHybridTestObjectSwiftKotlinSpec::resolvePendingPromiseOnWorker() {
+    static const auto method = _javaPart->javaClassStatic()->getMethod<void()>("resolvePendingPromiseOnWorker");
+    method(_javaPart);
   }
   std::shared_ptr<Promise<void>> JHybridTestObjectSwiftKotlinSpec::promiseThatResolvesVoidInstantly() {
     static const auto method = _javaPart->javaClassStatic()->getMethod<jni::local_ref<JPromise::javaobject>()>("promiseThatResolvesVoidInstantly");

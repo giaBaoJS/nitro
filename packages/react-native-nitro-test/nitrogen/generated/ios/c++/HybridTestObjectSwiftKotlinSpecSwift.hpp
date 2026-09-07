@@ -262,6 +262,19 @@ namespace margelo::nitro::test {
     inline void setIsBooleanWritable(bool isBooleanWritable) noexcept override {
       _swiftPart.setIsBooleanWritable(std::forward<decltype(isBooleanWritable)>(isBooleanWritable));
     }
+    inline bool getIsolatedBoolean() noexcept override {
+      return _swiftPart.isolatedBoolean();
+    }
+    inline void setIsolatedBoolean(bool isolatedBoolean) noexcept override {
+      _swiftPart.setIsolatedBoolean(std::forward<decltype(isolatedBoolean)>(isolatedBoolean));
+    }
+    inline std::string getIsTextValue() noexcept override {
+      auto __result = _swiftPart.getIsTextValue();
+      return __result;
+    }
+    inline void setIsTextValue(const std::string& isTextValue) noexcept override {
+      _swiftPart.setIsTextValue(isTextValue);
+    }
     inline std::variant<double, std::string> getSomeVariant() noexcept override {
       auto __result = _swiftPart.getSomeVariant();
       return __result;
@@ -663,6 +676,20 @@ namespace margelo::nitro::test {
       }
       auto __value = std::move(__result.value());
       return __value;
+    }
+    inline std::shared_ptr<Promise<double>> createPendingPromise() override {
+      auto __result = _swiftPart.createPendingPromise();
+      if (__result.hasError()) [[unlikely]] {
+        std::rethrow_exception(__result.error());
+      }
+      auto __value = std::move(__result.value());
+      return __value;
+    }
+    inline void resolvePendingPromiseOnWorker() override {
+      auto __result = _swiftPart.resolvePendingPromiseOnWorker();
+      if (__result.hasError()) [[unlikely]] {
+        std::rethrow_exception(__result.error());
+      }
     }
     inline std::shared_ptr<Promise<void>> promiseThatResolvesVoidInstantly() override {
       auto __result = _swiftPart.promiseThatResolvesVoidInstantly();

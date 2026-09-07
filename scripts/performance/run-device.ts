@@ -1,7 +1,6 @@
+import type { BenchmarkRunConfiguration } from '../../apps/benchmark/src/benchmarks/types'
 import path from 'node:path'
 import { mkdir, readFile } from 'node:fs/promises'
-import { parseArguments, requiredArgument } from './args'
-import { runIsolatedCases } from './isolated-cases'
 import { validateBenchmarkRun } from './schema'
 
 async function command(
@@ -41,48 +40,42 @@ async function commandOutput(
   return { exitCode, output }
 }
 
-const argumentsMap = parseArguments(Bun.argv.slice(2))
-const platform = requiredArgument(argumentsMap, 'platform')
-if (platform !== 'android' && platform !== 'ios') {
-  throw new Error('--platform must be android or ios.')
-}
-const app = path.resolve(requiredArgument(argumentsMap, 'app'))
-const output = path.resolve(requiredArgument(argumentsMap, 'output'))
-const deviceId = requiredArgument(argumentsMap, 'device-id')
-const casesDirectory = path.join(
-  path.dirname(output),
-  `${path.basename(output, '.json')}-cases`
-)
-const receiverArguments = [
-  path.join(import.meta.dir, 'receive.ts'),
-  '--platform',
-  platform,
-  '--run-id',
-  requiredArgument(argumentsMap, 'run-id'),
-  '--reverse',
-  requiredArgument(argumentsMap, 'reverse'),
-  '--commit-sha',
-  requiredArgument(argumentsMap, 'commit-sha'),
-  '--suite-hash',
-  requiredArgument(argumentsMap, 'suite-hash'),
-  '--device',
-  requiredArgument(argumentsMap, 'device'),
-  '--os-version',
-  requiredArgument(argumentsMap, 'os-version'),
-  '--architecture',
-  requiredArgument(argumentsMap, 'architecture'),
-  '--toolchain',
-  requiredArgument(argumentsMap, 'toolchain'),
-]
-
-async function runCase(index: number) {
-  const caseOutput = path.join(casesDirectory, `case-${index}.json`)
+/** Each call launches a fresh process and terminates it before returning. */
+export async function runDeviceCase(
+  deviceId: string,
+  appId: string,
+  configuration: BenchmarkRunConfiguration & { benchmarkIndex: number },
+  output: string
+) {
+  const { platform, benchmarkIndex: index } = configuration
+  await mkdir(path.dirname(output), { recursive: true })
+  const receiverArguments = [
+    path.join(import.meta.dir, 'receive.ts'),
+    '--platform',
+    platform,
+    '--run-id',
+    configuration.runId,
+    '--reverse',
+    String(configuration.reverse),
+    '--commit-sha',
+    configuration.commitSha,
+    '--suite-hash',
+    configuration.suiteHash,
+    '--device',
+    configuration.device,
+    '--os-version',
+    configuration.osVersion,
+    '--architecture',
+    configuration.architecture,
+    '--toolchain',
+    configuration.toolchain,
+  ]
   const receiver = Bun.spawn(
     [
       'bun',
       ...receiverArguments,
       '--output',
-      caseOutput,
+      output,
       '--benchmark-index',
       String(index),
       '--timeout-ms',
@@ -103,7 +96,7 @@ async function runCase(index: number) {
         deviceId,
         'shell',
         'pidof',
-        'com.margelo.nitrobenchmark',
+        appId,
       ])
       if (process.exitCode !== 0 || process.output.trim().length === 0) {
         throw new Error(
@@ -115,18 +108,23 @@ async function runCase(index: number) {
   }
 
   try {
+    let ready = false
     for (let attempt = 0; attempt < 50; attempt++) {
       try {
         const response = await fetch('http://127.0.0.1:8173/config')
-        if (response.ok) break
+        if (response.ok) {
+          ready = true
+          break
+        }
       } catch {
-        if (attempt === 49) throw new Error('Benchmark receiver did not start.')
+        // The receiver is still starting.
       }
       await Bun.sleep(100)
     }
 
+    if (!ready) throw new Error('Benchmark receiver did not start.')
+
     if (platform === 'android') {
-      const packageName = 'com.margelo.nitrobenchmark'
       await command('adb', [
         '-s',
         deviceId,
@@ -135,16 +133,15 @@ async function runCase(index: number) {
         'start',
         '-W',
         '-n',
-        `${packageName}/.MainActivity`,
+        `${appId}/com.margelo.nitrobenchmark.MainActivity`,
       ])
     } else {
-      const bundleIdentifier = 'com.margelo.nitrobenchmark'
       await command('xcrun', [
         'simctl',
         'launch',
         '--terminate-running-process',
         deviceId,
-        bundleIdentifier,
+        appId,
       ])
     }
 
@@ -159,11 +156,11 @@ async function runCase(index: number) {
       ? Promise.race([receiverCompletion, monitorAndroidProcess()])
       : receiverCompletion)
     const result = validateBenchmarkRun(
-      JSON.parse(await readFile(caseOutput, 'utf8'))
+      JSON.parse(await readFile(output, 'utf8'))
     )
     const metric = result.metrics[0]!
     console.info(
-      `[NitroBenchmark] case ${index + 1}/${result.benchmarkCount}: ${metric.id}, ${metric.iterations} ops/sample, median timed batch ${((metric.medianNsPerOp * metric.iterations) / 1e6).toFixed(1)} ms`
+      `[NitroBenchmark] ${new Date().toISOString()} ${configuration.runId} measurement case ${index + 1}/${result.benchmarkCount}: ${metric.id}, ${metric.iterations} ops/sample`
     )
     return result
   } catch (error) {
@@ -185,7 +182,7 @@ async function runCase(index: number) {
         'dumpsys',
         'activity',
         'exit-info',
-        'com.margelo.nitrobenchmark',
+        appId,
       ])
       const diagnostics = `${logs.output}\n${exits.output}`
       await Bun.write(output.replace(/\.json$/, '.failure.log'), diagnostics)
@@ -197,51 +194,31 @@ async function runCase(index: number) {
     if (platform === 'android') {
       await command(
         'adb',
-        [
-          '-s',
-          deviceId,
-          'shell',
-          'am',
-          'force-stop',
-          'com.margelo.nitrobenchmark',
-        ],
+        ['-s', deviceId, 'shell', 'am', 'force-stop', appId],
         true
       )
     } else {
-      await command(
-        'xcrun',
-        ['simctl', 'terminate', deviceId, 'com.margelo.nitrobenchmark'],
-        true
-      )
+      await command('xcrun', ['simctl', 'terminate', deviceId, appId], true)
     }
     receiver.kill()
     await receiver.exited
   }
 }
 
-// Installing once preserves the same binary while fresh processes release the
-// runtime-scoped JSI cache between cases. No install/launch work enters timing.
-await mkdir(casesDirectory, { recursive: true })
-if (platform === 'android') {
-  await command(
-    'adb',
-    ['-s', deviceId, 'uninstall', 'com.margelo.nitrobenchmark'],
-    true
-  )
-  await command('adb', ['-s', deviceId, 'install', '-r', app])
-  await command('adb', ['-s', deviceId, 'reverse', 'tcp:8173', 'tcp:8173'])
-} else {
-  await command(
-    'xcrun',
-    ['simctl', 'terminate', deviceId, 'com.margelo.nitrobenchmark'],
-    true
-  )
-  await command(
-    'xcrun',
-    ['simctl', 'uninstall', deviceId, 'com.margelo.nitrobenchmark'],
-    true
-  )
-  await command('xcrun', ['simctl', 'install', deviceId, app])
+/** Install once; app identities let revisions coexist on the same device. */
+export async function installApp(
+  platform: 'android' | 'ios',
+  deviceId: string,
+  app: string,
+  appId: string
+): Promise<void> {
+  if (platform === 'android') {
+    await command('adb', ['-s', deviceId, 'uninstall', appId], true)
+    await command('adb', ['-s', deviceId, 'install', '-r', app])
+    await command('adb', ['-s', deviceId, 'reverse', 'tcp:8173', 'tcp:8173'])
+  } else {
+    await command('xcrun', ['simctl', 'terminate', deviceId, appId], true)
+    await command('xcrun', ['simctl', 'uninstall', deviceId, appId], true)
+    await command('xcrun', ['simctl', 'install', deviceId, app])
+  }
 }
-const result = await runIsolatedCases(runCase)
-await Bun.write(output, `${JSON.stringify(result, null, 2)}\n`)

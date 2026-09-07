@@ -31,6 +31,8 @@ public protocol HybridTestObjectSwiftKotlinSpec_protocol: HybridObject {
   var isBoolean: Bool { get }
   var hasBooleanWritable: Bool { get set }
   var isBooleanWritable: Bool { get set }
+  var isolatedBoolean: Bool { get set }
+  var isTextValue: String { get set }
   var someVariant: Variant_Double_String { get set }
 
   // Methods
@@ -84,6 +86,8 @@ public protocol HybridTestObjectSwiftKotlinSpec_protocol: HybridObject {
   func promiseThrows() throws -> Promise<Void>
   func promiseReturnsInstantly() throws -> Promise<Double>
   func promiseReturnsInstantlyAsync() throws -> Promise<Double>
+  func createPendingPromise() throws -> Promise<Double>
+  func resolvePendingPromiseOnWorker() throws -> Void
   func promiseThatResolvesVoidInstantly() throws -> Promise<Void>
   func promiseThatResolvesToUndefined() throws -> Promise<Double?>
   func awaitNullablePromise() throws -> Promise<Double?>

@@ -12,28 +12,30 @@ export const benchmarkRuntime: BenchmarkRuntime = {
     if (gc == null) throw new Error('Benchmark runtime requires Hermes gc().')
     gc()
   },
-  // RCTTiming immediately re-enqueues zero-delay timers. A positive delay goes
-  // through its next-frame path, allowing the native run loop/pools to drain.
+  // Bridgeless RN schedules this through a native frame. Returning to its
+  // run loop lets deferred native cleanup (including autorelease pools) run.
   yieldToRuntime: () => new Promise((resolve) => setTimeout(resolve, 1)),
 }
 
 export async function executeBatch(
   definition: BenchmarkDefinition,
   iterations: number,
-  runtime: BenchmarkRuntime
-): Promise<{ durationMs: number; checksum: number }> {
-  const chunkIterations = Math.min(
+  runtime: BenchmarkRuntime,
+  chunkIterations = Math.min(
     iterations,
     definition.maxChunkIterations ?? iterations
   )
+): Promise<{ durationMs: number; checksum: number }> {
   if (!Number.isSafeInteger(chunkIterations) || chunkIterations < 1) {
     throw new Error(`Benchmark ${definition.id} has an invalid chunk size.`)
   }
   let durationMs = 0
   let checksum = 0
   let chunksSinceYield = 0
-  runtime.collectGarbage()
-  definition.collectNativeGarbage?.()
+  if (definition.cleanup !== 'none') {
+    runtime.collectGarbage()
+    definition.collectNativeGarbage?.()
+  }
   for (
     let remaining = iterations;
     remaining > 0;
@@ -59,8 +61,10 @@ export async function executeBatch(
     }
     durationMs += elapsed
     checksum += result
+    if (definition.cleanup === 'none') continue
     runtime.collectGarbage()
     definition.collectNativeGarbage?.()
+    if (definition.cleanup === 'gc') continue
     // Drain native autorelease pools/cleaners after at most four bounded chunks.
     // A native timer yield can cost a frame; do not pay it for every tiny chunk.
     chunksSinceYield++

@@ -8,6 +8,7 @@
 #include "HybridTestObjectCpp.hpp"
 #include <NitroModules/AnyMap.hpp>
 #include <NitroModules/NitroLogger.hpp>
+#include <NitroModules/ThreadPool.hpp>
 #include <chrono>
 #include <sstream>
 #include <thread>
@@ -181,6 +182,22 @@ bool HybridTestObjectCpp::getHasBooleanWritable() {
 
 void HybridTestObjectCpp::setHasBooleanWritable(bool hasBooleanWritable) {
   _hasBooleanWritable = hasBooleanWritable;
+}
+
+bool HybridTestObjectCpp::getIsolatedBoolean() {
+  return _isolatedBoolean;
+}
+
+void HybridTestObjectCpp::setIsolatedBoolean(bool isolatedBoolean) {
+  _isolatedBoolean = isolatedBoolean;
+}
+
+std::string HybridTestObjectCpp::getIsTextValue() {
+  return _isTextValue;
+}
+
+void HybridTestObjectCpp::setIsTextValue(const std::string& isTextValue) {
+  _isTextValue = isTextValue;
 }
 
 void HybridTestObjectCpp::setOptionalCallback(const std::optional<std::function<void(double)>>& callback) {
@@ -609,6 +626,23 @@ std::shared_ptr<Promise<double>> HybridTestObjectCpp::promiseReturnsInstantly() 
 
 std::shared_ptr<Promise<double>> HybridTestObjectCpp::promiseReturnsInstantlyAsync() {
   return Promise<double>::async([=]() { return 55; });
+}
+
+std::shared_ptr<Promise<double>> HybridTestObjectCpp::createPendingPromise() {
+  if (_pendingPromise) {
+    throw std::runtime_error("A pending Promise is already waiting for completion.");
+  }
+  _pendingPromise = Promise<double>::create();
+  return _pendingPromise;
+}
+
+void HybridTestObjectCpp::resolvePendingPromiseOnWorker() {
+  if (!_pendingPromise) {
+    throw std::runtime_error("No pending Promise is waiting for completion.");
+  }
+  // Only JS calls access the slot; the worker owns the extracted Promise.
+  auto promise = std::move(_pendingPromise);
+  ThreadPool::shared().run([promise = std::move(promise)]() { promise->resolve(55); });
 }
 
 std::shared_ptr<Promise<void>> HybridTestObjectCpp::promiseThatResolvesVoidInstantly() {

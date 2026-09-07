@@ -90,5 +90,6 @@ try {
   process.exitCode = 1
 } finally {
   clearTimeout(timeout)
-  await server.stop(true)
+  // Finish the accepted HTTP response before closing the receiver.
+  await server.stop()
 }
