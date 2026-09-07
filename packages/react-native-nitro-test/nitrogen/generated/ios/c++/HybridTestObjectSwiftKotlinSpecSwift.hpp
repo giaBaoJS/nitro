@@ -1109,6 +1109,22 @@ namespace margelo::nitro::test {
       auto __value = std::move(__result.value());
       return __value;
     }
+    inline std::function<int64_t(int64_t /* value */)> bounceSyncInt64Callback(const std::function<int64_t(int64_t /* value */)>& callback) override {
+      auto __result = _swiftPart.bounceSyncInt64Callback(callback);
+      if (__result.hasError()) [[unlikely]] {
+        std::rethrow_exception(__result.error());
+      }
+      auto __value = std::move(__result.value());
+      return __value;
+    }
+    inline std::function<uint64_t(uint64_t /* value */)> bounceSyncUInt64Callback(const std::function<uint64_t(uint64_t /* value */)>& callback) override {
+      auto __result = _swiftPart.bounceSyncUInt64Callback(callback);
+      if (__result.hasError()) [[unlikely]] {
+        std::rethrow_exception(__result.error());
+      }
+      auto __value = std::move(__result.value());
+      return __value;
+    }
     inline bool getIsViewBlue(const std::shared_ptr<HybridTestViewSpec>& view) override {
       auto __result = _swiftPart.getIsViewBlue(view);
       if (__result.hasError()) [[unlikely]] {

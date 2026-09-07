@@ -2453,6 +2453,41 @@ export function getTests(
         .didNotThrow()
         .equals(55)
     ),
+    ...[-(2n ** 63n), -1n, 0n, 2n ** 63n - 1n].map((value) =>
+      createTest(`Int64 callback roundtrip preserves ${value}`, () =>
+        it(() => {
+          const callback = testObject.bounceSyncInt64Callback((input) => input)
+          return callback(value)
+        })
+          .didNotThrow()
+          .equals(value)
+      )
+    ),
+    ...[0n, 1n, 2n ** 63n, 2n ** 64n - 1n].map((value) =>
+      createTest(`UInt64 callback roundtrip preserves ${value}`, () =>
+        it(() => {
+          const callback = testObject.bounceSyncUInt64Callback((input) => input)
+          return callback(value)
+        })
+          .didNotThrow()
+          .equals(value)
+      )
+    ),
+    createTest(
+      'native void callback invokes its wrapped JS callback',
+      async () =>
+        (
+          await it(
+            () =>
+              new Promise<number>((resolve) => {
+                const callback = testObject.createNativeCallback(resolve)
+                callback(55)
+              })
+          )
+        )
+          .didNotThrow()
+          .equals(55)
+    ),
     createTest('bounceExternalHybrid(...) works', () =>
       it(() => {
         return testObject.bounceExternalHybrid(HybridSomeExternalObject)

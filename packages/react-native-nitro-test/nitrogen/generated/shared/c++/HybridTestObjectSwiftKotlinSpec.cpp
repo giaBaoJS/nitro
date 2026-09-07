@@ -163,6 +163,8 @@ namespace margelo::nitro::test {
       prototype.registerHybridMethod("castBase", &HybridTestObjectSwiftKotlinSpec::castBase);
       prototype.registerHybridMethod("callbackSync", &HybridTestObjectSwiftKotlinSpec::callbackSync);
       prototype.registerHybridMethod("getSyncNumberCallback", &HybridTestObjectSwiftKotlinSpec::getSyncNumberCallback);
+      prototype.registerHybridMethod("bounceSyncInt64Callback", &HybridTestObjectSwiftKotlinSpec::bounceSyncInt64Callback);
+      prototype.registerHybridMethod("bounceSyncUInt64Callback", &HybridTestObjectSwiftKotlinSpec::bounceSyncUInt64Callback);
       prototype.registerHybridMethod("getIsViewBlue", &HybridTestObjectSwiftKotlinSpec::getIsViewBlue);
       prototype.registerHybridMethod("bounceExternalHybrid", &HybridTestObjectSwiftKotlinSpec::bounceExternalHybrid);
       prototype.registerHybridMethod("createInternalObject", &HybridTestObjectSwiftKotlinSpec::createInternalObject);
