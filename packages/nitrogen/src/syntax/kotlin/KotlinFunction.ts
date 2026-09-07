@@ -4,24 +4,8 @@ import { includeHeader } from '../c++/includeNitroHeader.js'
 import { createFileMetadataString, isNotDuplicate } from '../helpers.js'
 import type { SourceFile } from '../SourceFile.js'
 import type { FunctionType } from '../types/FunctionType.js'
-import type { Type } from '../types/Type.js'
 import { addJNINativeRegistration } from './JNINativeRegistrations.js'
 import { KotlinCxxBridgedType } from './KotlinCxxBridgedType.js'
-
-/**
- * Whether the JVM signature of the generated `fun interface`'s `invoke` boxes the
- * given return type. `Unit` maps to `void`, every other primitive is boxed.
- */
-function hasBoxedJvmReturnType(returnType: Type): boolean {
-  switch (returnType.kind) {
-    case 'number':
-    case 'boolean':
-    case 'int64':
-      return true
-    default:
-      return false
-  }
-}
 
 export function createKotlinFunction(functionType: FunctionType): SourceFile[] {
   const name = functionType.specializationName
@@ -126,9 +110,9 @@ class ${name}_java(private val function: ${lambdaSignature}): ${name} {
     `${name}_cxx`
   )
   const bridgedReturn = new KotlinCxxBridgedType(functionType.returnType)
-  // `invoke` overrides `FunctionN.invoke`, whose return type is a generic - so Kotlin
-  // boxes it. Parameters are unaffected, they are specialized to primitives.
-  const isReturnBoxed = hasBoxedJvmReturnType(functionType.returnType)
+  // `invoke` overrides `FunctionN.invoke`, so its return type is a generic - unlike
+  // its parameters, which kotlinc specializes to primitives.
+  const isReturnBoxed = bridgedReturn.isBoxedAsJvmGeneric
   const cxxNamespace = NitroConfig.current.getCxxNamespace('c++')
   const typename = functionType.getCode('c++')
 
@@ -158,10 +142,7 @@ class ${name}_java(private val function: ${lambdaSignature}): ${name} {
       return bridge.parseFromCppToKotlin(p.escapedName, 'c++', false)
     }),
   ]
-  const jniReturnType = isReturnBoxed
-    ? `jni::local_ref<${bridgedReturn.getTypeCode('c++', true)}>`
-    : bridgedReturn.asJniReferenceType('local')
-  const jniSignature = `${jniReturnType}(${functionType.parameters
+  const jniSignature = `${bridgedReturn.asJniReferenceType('local', isReturnBoxed)}(${functionType.parameters
     .map((p) => {
       const bridge = new KotlinCxxBridgedType(p)
       return `${bridge.asJniReferenceType('alias')} /* ${p.escapedName} */`

@@ -231,7 +231,31 @@ export class KotlinCxxBridgedType implements BridgedType<'kotlin', 'c++'> {
     return files
   }
 
-  asJniReferenceType(referenceType: 'alias' | 'local' | 'global' = 'alias') {
+  /**
+   * Whether the JVM erases this type to its boxed form when it is used as a generic
+   * argument - e.g. the `Double` in `Function0<Double>` becomes a `java.lang.Double`.
+   */
+  get isBoxedAsJvmGeneric(): boolean {
+    switch (this.type.kind) {
+      case 'number':
+      case 'boolean':
+      case 'int64':
+        return true
+      default:
+        // `Unit` erases to `void`, and `ULong` is an inline class - kotlinc mangles
+        // the method name for those rather than boxing them.
+        return false
+    }
+  }
+
+  asJniReferenceType(
+    referenceType: 'alias' | 'local' | 'global' = 'alias',
+    isBoxed = false
+  ) {
+    if (isBoxed) {
+      // a boxed primitive (e.g. `JDouble`) is an object, so it is a reference
+      return `jni::${referenceType}_ref<${this.getTypeCode('c++', true)}>`
+    }
     switch (this.type.kind) {
       case 'void':
       case 'number':
