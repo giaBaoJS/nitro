@@ -107,7 +107,7 @@ export class Property implements CodeNode {
   getSetterName(environment: LanguageEnvironment): string {
     if (environment === 'jvm' && hasJvmIsPrefix(this.name)) {
       // isSomething -> setSomething()
-      return `set${capitalizeName(this.name.slice(2))}`
+      return `set${this.name.slice(2)}`
     }
     // isSomething -> setIsSomething()
     return `set${capitalizeName(this.name)}`

@@ -46,7 +46,7 @@ private:
   bool _hasBooleanWritable;
   bool _isBooleanWritable;
   std::shared_ptr<Promise<double>> _pendingPromise;
-  bool _isolatedBoolean;
+  bool _isolatedBoolean = false;
   std::string _isTextValue;
 
 private:
